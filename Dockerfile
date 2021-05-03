@@ -1,11 +1,11 @@
-FROM ghcr.io/linuxserver/baseimage-mono:bionic-5.14
+FROM ghcr.io/linuxserver/baseimage-mono:LTS
 
 # set version label
 ARG BUILD_DATE
 ARG VERSION
 ARG RADARR_RELEASE
 LABEL build_version="Linuxserver.io version:- ${VERSION} Build-date:- ${BUILD_DATE}"
-LABEL maintainer="sparklyballs"
+LABEL maintainer="KaHooli"
 
 # environment settings
 ARG DEBIAN_FRONTEND="noninteractive"
