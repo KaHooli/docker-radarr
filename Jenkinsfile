@@ -16,6 +16,9 @@ pipeline {
     GITHUB_TOKEN=credentials('498b4638-2d02-4ce5-832d-8a57d01d97ab')
     GITLAB_TOKEN=credentials('b6f0f1dd-6952-4cf6-95d1-9c06380283f0')
     GITLAB_NAMESPACE=credentials('gitlab-namespace-id')
+    EXT_GIT_BRANCH = 'master'
+    EXT_USER = 'Radarr'
+    EXT_REPO = 'Radarr'
     BUILD_VERSION_ARG = 'RADARR_RELEASE'
     LS_USER = 'linuxserver'
     LS_REPO = 'docker-radarr'
@@ -41,7 +44,7 @@ pipeline {
         script{
           env.EXIT_STATUS = ''
           env.LS_RELEASE = sh(
-            script: '''docker run --rm ghcr.io/linuxserver/alexeiled-skopeo sh -c 'skopeo inspect docker://docker.io/'${DOCKERHUB_IMAGE}':latest 2>/dev/null' | jq -r '.Labels.build_version' | awk '{print $3}' | grep '\\-ls' || : ''',
+            script: '''docker run --rm ghcr.io/linuxserver/alexeiled-skopeo sh -c 'skopeo inspect docker://docker.io/'${DOCKERHUB_IMAGE}':5.14 2>/dev/null' | jq -r '.Labels.build_version' | awk '{print $3}' | grep '\\-ls' || : ''',
             returnStdout: true).trim()
           env.LS_RELEASE_NOTES = sh(
             script: '''cat readme-vars.yml | awk -F \\" '/date: "[0-9][0-9].[0-9][0-9].[0-9][0-9]:/ {print $4;exit;}' | sed -E ':a;N;$!ba;s/\\r{0,1}\\n/\\\\n/g' ''',
@@ -55,7 +58,7 @@ pipeline {
           env.CODE_URL = 'https://github.com/' + env.LS_USER + '/' + env.LS_REPO + '/commit/' + env.GIT_COMMIT
           env.DOCKERHUB_LINK = 'https://hub.docker.com/r/' + env.DOCKERHUB_IMAGE + '/tags/'
           env.PULL_REQUEST = env.CHANGE_ID
-          env.TEMPLATED_FILES = 'Jenkinsfile README.md LICENSE ./.github/CONTRIBUTING.md ./.github/FUNDING.yml ./.github/ISSUE_TEMPLATE/config.yml ./.github/ISSUE_TEMPLATE/issue.bug.md ./.github/ISSUE_TEMPLATE/issue.feature.md ./.github/PULL_REQUEST_TEMPLATE.md ./.github/workflows/external_trigger_scheduler.yml ./.github/workflows/greetings.yml ./.github/workflows/package_trigger_scheduler.yml ./.github/workflows/stale.yml ./.github/workflows/external_trigger.yml ./.github/workflows/package_trigger.yml ./root/donate.txt'
+          env.TEMPLATED_FILES = 'Jenkinsfile README.md LICENSE ./.github/CONTRIBUTING.md ./.github/FUNDING.yml ./.github/ISSUE_TEMPLATE.md ./.github/PULL_REQUEST_TEMPLATE.md ./.github/workflows/greetings.yml ./.github/workflows/stale.yml'
         }
         script{
           env.LS_RELEASE_NUMBER = sh(
@@ -119,10 +122,10 @@ pipeline {
         }
       }
     }
-    // If this is a master build use live docker endpoints
+    // If this is a 5.14 build use live docker endpoints
     stage("Set ENV live build"){
       when {
-        branch "master"
+        branch "5.14"
         environment name: 'CHANGE_ID', value: ''
       }
       steps {
@@ -144,7 +147,7 @@ pipeline {
     // If this is a dev build use dev docker endpoints
     stage("Set ENV dev build"){
       when {
-        not {branch "master"}
+        not {branch "5.14"}
         environment name: 'CHANGE_ID', value: ''
       }
       steps {
@@ -219,7 +222,7 @@ pipeline {
     // Use helper containers to render templated files
     stage('Update-Templates') {
       when {
-        branch "master"
+        branch "5.14"
         environment name: 'CHANGE_ID', value: ''
         expression {
           env.CONTAINER_NAME != null
@@ -230,67 +233,19 @@ pipeline {
               set -e
               TEMPDIR=$(mktemp -d)
               docker pull ghcr.io/linuxserver/jenkins-builder:latest
-              docker run --rm -e CONTAINER_NAME=${CONTAINER_NAME} -e GITHUB_BRANCH=master -v ${TEMPDIR}:/ansible/jenkins ghcr.io/linuxserver/jenkins-builder:latest 
-              # Stage 1 - Jenkinsfile update
-              if [[ "$(md5sum Jenkinsfile | awk '{ print $1 }')" != "$(md5sum ${TEMPDIR}/docker-${CONTAINER_NAME}/Jenkinsfile | awk '{ print $1 }')" ]]; then
-                mkdir -p ${TEMPDIR}/repo
-                git clone https://github.com/${LS_USER}/${LS_REPO}.git ${TEMPDIR}/repo/${LS_REPO}
-                cd ${TEMPDIR}/repo/${LS_REPO}
-                git checkout -f master
-                cp ${TEMPDIR}/docker-${CONTAINER_NAME}/Jenkinsfile ${TEMPDIR}/repo/${LS_REPO}/
-                git add Jenkinsfile
-                git commit -m 'Bot Updating Templated Files'
-                git push https://LinuxServer-CI:${GITHUB_TOKEN}@github.com/${LS_USER}/${LS_REPO}.git --all
-                echo "true" > /tmp/${COMMIT_SHA}-${BUILD_NUMBER}
-                echo "Updating Jenkinsfile"
-                rm -Rf ${TEMPDIR}
-                exit 0
-              else
-                echo "Jenkinsfile is up to date."
-              fi
-              # Stage 2 - Delete old templates
-              OLD_TEMPLATES=".github/ISSUE_TEMPLATE.md"
-              for i in ${OLD_TEMPLATES}; do
-                if [[ -f "${i}" ]]; then
-                  TEMPLATES_TO_DELETE="${i} ${TEMPLATES_TO_DELETE}"
-                fi
-              done
-              if [[ -n "${TEMPLATES_TO_DELETE}" ]]; then
-                mkdir -p ${TEMPDIR}/repo
-                git clone https://github.com/${LS_USER}/${LS_REPO}.git ${TEMPDIR}/repo/${LS_REPO}
-                cd ${TEMPDIR}/repo/${LS_REPO}
-                git checkout -f master
-                cd ${TEMPDIR}/docker-${CONTAINER_NAME}
-                for i in ${TEMPLATES_TO_DELETE}; do
-                  git rm "${i}"
-                done
-                git commit -m 'Bot Updating Templated Files'
-                git push https://LinuxServer-CI:${GITHUB_TOKEN}@github.com/${LS_USER}/${LS_REPO}.git --all
-                echo "true" > /tmp/${COMMIT_SHA}-${BUILD_NUMBER}
-                echo "Deleting old templates"
-                rm -Rf ${TEMPDIR}
-                exit 0
-              else
-                echo "No templates to delete"
-              fi
-              # Stage 3 - Update templates
+              docker run --rm -e CONTAINER_NAME=${CONTAINER_NAME} -e GITHUB_BRANCH=5.14 -v ${TEMPDIR}:/ansible/jenkins ghcr.io/linuxserver/jenkins-builder:latest
               CURRENTHASH=$(grep -hs ^ ${TEMPLATED_FILES} | md5sum | cut -c1-8)
               cd ${TEMPDIR}/docker-${CONTAINER_NAME}
               NEWHASH=$(grep -hs ^ ${TEMPLATED_FILES} | md5sum | cut -c1-8)
-              if [[ "${CURRENTHASH}" != "${NEWHASH}" ]] || ! grep -q '.jenkins-external' "${WORKSPACE}/.gitignore" 2>/dev/null; then
+              if [[ "${CURRENTHASH}" != "${NEWHASH}" ]]; then
                 mkdir -p ${TEMPDIR}/repo
                 git clone https://github.com/${LS_USER}/${LS_REPO}.git ${TEMPDIR}/repo/${LS_REPO}
                 cd ${TEMPDIR}/repo/${LS_REPO}
-                git checkout -f master
+                git checkout -f 5.14
                 cd ${TEMPDIR}/docker-${CONTAINER_NAME}
                 mkdir -p ${TEMPDIR}/repo/${LS_REPO}/.github/workflows
-                mkdir -p ${TEMPDIR}/repo/${LS_REPO}/.github/ISSUE_TEMPLATE
-                cp --parents ${TEMPLATED_FILES} ${TEMPDIR}/repo/${LS_REPO}/ || :
+                cp --parents ${TEMPLATED_FILES} ${TEMPDIR}/repo/${LS_REPO}/
                 cd ${TEMPDIR}/repo/${LS_REPO}/
-                if ! grep -q '.jenkins-external' .gitignore 2>/dev/null; then
-                  echo ".jenkins-external" >> .gitignore
-                  git add .gitignore
-                fi
                 git add ${TEMPLATED_FILES}
                 git commit -m 'Bot Updating Templated Files'
                 git push https://LinuxServer-CI:${GITHUB_TOKEN}@github.com/${LS_USER}/${LS_REPO}.git --all
@@ -300,8 +255,8 @@ pipeline {
               fi
               mkdir -p ${TEMPDIR}/gitbook
               git clone https://github.com/linuxserver/docker-documentation.git ${TEMPDIR}/gitbook/docker-documentation
-              if [[ ("${BRANCH_NAME}" == "master") || ("${BRANCH_NAME}" == "main") ]] && [[ (! -f ${TEMPDIR}/gitbook/docker-documentation/images/docker-${CONTAINER_NAME}.md) || ("$(md5sum ${TEMPDIR}/gitbook/docker-documentation/images/docker-${CONTAINER_NAME}.md | awk '{ print $1 }')" != "$(md5sum ${TEMPDIR}/docker-${CONTAINER_NAME}/.jenkins-external/docker-${CONTAINER_NAME}.md | awk '{ print $1 }')") ]]; then
-                cp ${TEMPDIR}/docker-${CONTAINER_NAME}/.jenkins-external/docker-${CONTAINER_NAME}.md ${TEMPDIR}/gitbook/docker-documentation/images/
+              if [[ "${BRANCH_NAME}" == "master" ]] && [[ (! -f ${TEMPDIR}/gitbook/docker-documentation/images/docker-${CONTAINER_NAME}.md) || ("$(md5sum ${TEMPDIR}/gitbook/docker-documentation/images/docker-${CONTAINER_NAME}.md | awk '{ print $1 }')" != "$(md5sum ${TEMPDIR}/docker-${CONTAINER_NAME}/docker-${CONTAINER_NAME}.md | awk '{ print $1 }')") ]]; then
+                cp ${TEMPDIR}/docker-${CONTAINER_NAME}/docker-${CONTAINER_NAME}.md ${TEMPDIR}/gitbook/docker-documentation/images/
                 cd ${TEMPDIR}/gitbook/docker-documentation/
                 git add images/docker-${CONTAINER_NAME}.md
                 git commit -m 'Bot Updating Documentation'
@@ -337,7 +292,7 @@ pipeline {
     // Exit the build if the Templated files were just updated
     stage('Template-exit') {
       when {
-        branch "master"
+        branch "5.14"
         environment name: 'CHANGE_ID', value: ''
         environment name: 'FILES_UPDATED', value: 'true'
         expression {
@@ -368,7 +323,7 @@ pipeline {
              "merge_requests_access_level":"disabled",\
              "repository_access_level":"enabled",\
              "visibility":"public"}' '''
-      } 
+      }
     }
     /* ###############
        Build Container
@@ -430,26 +385,12 @@ pipeline {
             label 'ARMHF'
           }
           steps {
-            echo "Running on node: ${NODE_NAME}"
             echo 'Logging into Github'
             sh '''#! /bin/bash
                   echo $GITHUB_TOKEN | docker login ghcr.io -u LinuxServer-CI --password-stdin
                '''
-            sh "docker build \
-              --label \"org.opencontainers.image.created=${GITHUB_DATE}\" \
-              --label \"org.opencontainers.image.authors=linuxserver.io\" \
-              --label \"org.opencontainers.image.url=https://github.com/linuxserver/docker-radarr/packages\" \
-              --label \"org.opencontainers.image.documentation=https://docs.linuxserver.io/images/docker-radarr\" \
-              --label \"org.opencontainers.image.source=https://github.com/linuxserver/docker-radarr\" \
-              --label \"org.opencontainers.image.version=${EXT_RELEASE_CLEAN}-ls${LS_TAG_NUMBER}\" \
-              --label \"org.opencontainers.image.revision=${COMMIT_SHA}\" \
-              --label \"org.opencontainers.image.vendor=linuxserver.io\" \
-              --label \"org.opencontainers.image.licenses=GPL-3.0-only\" \
-              --label \"org.opencontainers.image.ref.name=${COMMIT_SHA}\" \
-              --label \"org.opencontainers.image.title=Radarr\" \
-              --label \"org.opencontainers.image.description=[Radarr](https://github.com/Radarr/Radarr) - A fork of Sonarr to work with movies à la Couchpotato.  \" \
-              --no-cache --pull -f Dockerfile.armhf -t ${IMAGE}:arm32v7-${META_TAG} \
-              --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=\"${VERSION_TAG}\" --build-arg BUILD_DATE=${GITHUB_DATE} ."
+            sh "docker build --no-cache --pull -f Dockerfile.armhf -t ${IMAGE}:arm32v7-${META_TAG} \
+                         --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=\"${META_TAG}\" --build-arg BUILD_DATE=${GITHUB_DATE} ."
             sh "docker tag ${IMAGE}:arm32v7-${META_TAG} ghcr.io/linuxserver/lsiodev-buildcache:arm32v7-${COMMIT_SHA}-${BUILD_NUMBER}"
             retry(5) {
               sh "docker push ghcr.io/linuxserver/lsiodev-buildcache:arm32v7-${COMMIT_SHA}-${BUILD_NUMBER}"
@@ -464,26 +405,12 @@ pipeline {
             label 'ARM64'
           }
           steps {
-            echo "Running on node: ${NODE_NAME}"
             echo 'Logging into Github'
             sh '''#! /bin/bash
                   echo $GITHUB_TOKEN | docker login ghcr.io -u LinuxServer-CI --password-stdin
                '''
-            sh "docker build \
-              --label \"org.opencontainers.image.created=${GITHUB_DATE}\" \
-              --label \"org.opencontainers.image.authors=linuxserver.io\" \
-              --label \"org.opencontainers.image.url=https://github.com/linuxserver/docker-radarr/packages\" \
-              --label \"org.opencontainers.image.documentation=https://docs.linuxserver.io/images/docker-radarr\" \
-              --label \"org.opencontainers.image.source=https://github.com/linuxserver/docker-radarr\" \
-              --label \"org.opencontainers.image.version=${EXT_RELEASE_CLEAN}-ls${LS_TAG_NUMBER}\" \
-              --label \"org.opencontainers.image.revision=${COMMIT_SHA}\" \
-              --label \"org.opencontainers.image.vendor=linuxserver.io\" \
-              --label \"org.opencontainers.image.licenses=GPL-3.0-only\" \
-              --label \"org.opencontainers.image.ref.name=${COMMIT_SHA}\" \
-              --label \"org.opencontainers.image.title=Radarr\" \
-              --label \"org.opencontainers.image.description=[Radarr](https://github.com/Radarr/Radarr) - A fork of Sonarr to work with movies à la Couchpotato.  \" \
-              --no-cache --pull -f Dockerfile.aarch64 -t ${IMAGE}:arm64v8-${META_TAG} \
-              --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=\"${VERSION_TAG}\" --build-arg BUILD_DATE=${GITHUB_DATE} ."
+            sh "docker build --no-cache --pull -f Dockerfile.aarch64 -t ${IMAGE}:arm64v8-${META_TAG} \
+                         --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=\"${META_TAG}\" --build-arg BUILD_DATE=${GITHUB_DATE} ."
             sh "docker tag ${IMAGE}:arm64v8-${META_TAG} ghcr.io/linuxserver/lsiodev-buildcache:arm64v8-${COMMIT_SHA}-${BUILD_NUMBER}"
             retry(5) {
               sh "docker push ghcr.io/linuxserver/lsiodev-buildcache:arm64v8-${COMMIT_SHA}-${BUILD_NUMBER}"
@@ -498,7 +425,7 @@ pipeline {
     // Take the image we just built and dump package versions for comparison
     stage('Update-packages') {
       when {
-        branch "master"
+        branch "5.14"
         environment name: 'CHANGE_ID', value: ''
         environment name: 'EXIT_STATUS', value: ''
       }
@@ -526,7 +453,7 @@ pipeline {
               echo "Package tag sha from current packages in buit container is ${NEW_PACKAGE_TAG} comparing to old ${PACKAGE_TAG} from github"
               if [ "${NEW_PACKAGE_TAG}" != "${PACKAGE_TAG}" ]; then
                 git clone https://github.com/${LS_USER}/${LS_REPO}.git ${TEMPDIR}/${LS_REPO}
-                git --git-dir ${TEMPDIR}/${LS_REPO}/.git checkout -f master
+                git --git-dir ${TEMPDIR}/${LS_REPO}/.git checkout -f 5.14
                 cp ${TEMPDIR}/package_versions.txt ${TEMPDIR}/${LS_REPO}/
                 cd ${TEMPDIR}/${LS_REPO}/
                 wait
@@ -550,7 +477,7 @@ pipeline {
     // Exit the build if the package file was just updated
     stage('PACKAGE-exit') {
       when {
-        branch "master"
+        branch "5.14"
         environment name: 'CHANGE_ID', value: ''
         environment name: 'PACKAGE_UPDATED', value: 'true'
         environment name: 'EXIT_STATUS', value: ''
@@ -571,7 +498,7 @@ pipeline {
     // Exit the build if this is just a package check and there are no changes to push
     stage('PACKAGECHECK-exit') {
       when {
-        branch "master"
+        branch "5.14"
         environment name: 'CHANGE_ID', value: ''
         environment name: 'PACKAGE_UPDATED', value: 'false'
         environment name: 'EXIT_STATUS', value: ''
@@ -611,7 +538,7 @@ pipeline {
           }
           sh '''#! /bin/bash
                 set -e
-                docker pull ghcr.io/linuxserver/ci:latest
+                docker pull ghcr.io/linuxserver/lsiodev-ci:latest
                 if [ "${MULTIARCH}" == "true" ]; then
                   docker pull ghcr.io/linuxserver/lsiodev-buildcache:arm32v7-${COMMIT_SHA}-${BUILD_NUMBER}
                   docker pull ghcr.io/linuxserver/lsiodev-buildcache:arm64v8-${COMMIT_SHA}-${BUILD_NUMBER}
@@ -636,7 +563,7 @@ pipeline {
                 -e WEB_PATH=\"${CI_WEBPATH}\" \
                 -e DO_REGION="ams3" \
                 -e DO_BUCKET="lsio-ci" \
-                -t ghcr.io/linuxserver/ci:latest \
+                -t ghcr.io/linuxserver/lsiodev-ci:latest \
                 python /ci/ci.py'''
         }
       }
@@ -667,20 +594,20 @@ pipeline {
                   echo $GITLAB_TOKEN | docker login registry.gitlab.com -u LinuxServer.io --password-stdin
                   for PUSHIMAGE in "${GITHUBIMAGE}" "${GITLABIMAGE}" "${IMAGE}"; do
                     docker tag ${IMAGE}:${META_TAG} ${PUSHIMAGE}:${META_TAG}
-                    docker tag ${PUSHIMAGE}:${META_TAG} ${PUSHIMAGE}:latest
+                    docker tag ${PUSHIMAGE}:${META_TAG} ${PUSHIMAGE}:5.14
                     docker tag ${PUSHIMAGE}:${META_TAG} ${PUSHIMAGE}:${EXT_RELEASE_TAG}
-                    docker push ${PUSHIMAGE}:latest
+                    docker push ${PUSHIMAGE}:5.14
                     docker push ${PUSHIMAGE}:${META_TAG}
                     docker push ${PUSHIMAGE}:${EXT_RELEASE_TAG}
                   done
                '''
           }
           sh '''#! /bin/bash
-                for DELETEIMAGE in "${GITHUBIMAGE}" "${GITLABIMAGE}" "${IMAGE}"; do
+                for DELETEIMAGE in "${GITHUBIMAGE}" "{GITLABIMAGE}" "${IMAGE}"; do
                   docker rmi \
                   ${DELETEIMAGE}:${META_TAG} \
                   ${DELETEIMAGE}:${EXT_RELEASE_TAG} \
-                  ${DELETEIMAGE}:latest || :
+                  ${DELETEIMAGE}:5.14 || :
                 done
              '''
         }
@@ -717,36 +644,35 @@ pipeline {
                     docker tag ${IMAGE}:amd64-${META_TAG} ${MANIFESTIMAGE}:amd64-${META_TAG}
                     docker tag ${IMAGE}:arm32v7-${META_TAG} ${MANIFESTIMAGE}:arm32v7-${META_TAG}
                     docker tag ${IMAGE}:arm64v8-${META_TAG} ${MANIFESTIMAGE}:arm64v8-${META_TAG}
-                    docker tag ${MANIFESTIMAGE}:amd64-${META_TAG} ${MANIFESTIMAGE}:amd64-latest
-                    docker tag ${MANIFESTIMAGE}:arm32v7-${META_TAG} ${MANIFESTIMAGE}:arm32v7-latest
-                    docker tag ${MANIFESTIMAGE}:arm64v8-${META_TAG} ${MANIFESTIMAGE}:arm64v8-latest
+                    docker tag ${MANIFESTIMAGE}:amd64-${META_TAG} ${MANIFESTIMAGE}:amd64-5.14
+                    docker tag ${MANIFESTIMAGE}:arm32v7-${META_TAG} ${MANIFESTIMAGE}:arm32v7-5.14
+                    docker tag ${MANIFESTIMAGE}:arm64v8-${META_TAG} ${MANIFESTIMAGE}:arm64v8-5.14
                     docker tag ${MANIFESTIMAGE}:amd64-${META_TAG} ${MANIFESTIMAGE}:amd64-${EXT_RELEASE_TAG}
                     docker tag ${MANIFESTIMAGE}:arm32v7-${META_TAG} ${MANIFESTIMAGE}:arm32v7-${EXT_RELEASE_TAG}
                     docker tag ${MANIFESTIMAGE}:arm64v8-${META_TAG} ${MANIFESTIMAGE}:arm64v8-${EXT_RELEASE_TAG}
                     docker push ${MANIFESTIMAGE}:amd64-${META_TAG}
                     docker push ${MANIFESTIMAGE}:arm32v7-${META_TAG}
                     docker push ${MANIFESTIMAGE}:arm64v8-${META_TAG}
-                    docker push ${MANIFESTIMAGE}:amd64-latest
-                    docker push ${MANIFESTIMAGE}:arm32v7-latest
-                    docker push ${MANIFESTIMAGE}:arm64v8-latest
+                    docker push ${MANIFESTIMAGE}:amd64-5.14
+                    docker push ${MANIFESTIMAGE}:arm32v7-5.14
+                    docker push ${MANIFESTIMAGE}:arm64v8-5.14
                     docker push ${MANIFESTIMAGE}:amd64-${EXT_RELEASE_TAG}
                     docker push ${MANIFESTIMAGE}:arm32v7-${EXT_RELEASE_TAG}
                     docker push ${MANIFESTIMAGE}:arm64v8-${EXT_RELEASE_TAG}
-                    docker manifest push --purge ${MANIFESTIMAGE}:latest || :
-                    docker manifest create ${MANIFESTIMAGE}:latest ${MANIFESTIMAGE}:amd64-latest ${MANIFESTIMAGE}:arm32v7-latest ${MANIFESTIMAGE}:arm64v8-latest
-                    docker manifest annotate ${MANIFESTIMAGE}:latest ${MANIFESTIMAGE}:arm32v7-latest --os linux --arch arm
-                    docker manifest annotate ${MANIFESTIMAGE}:latest ${MANIFESTIMAGE}:arm64v8-latest --os linux --arch arm64 --variant v8
+                    docker manifest push --purge ${MANIFESTIMAGE}:5.14 || :
+                    docker manifest create ${MANIFESTIMAGE}:5.14 ${MANIFESTIMAGE}:amd64-5.14 ${MANIFESTIMAGE}:arm32v7-5.14 ${MANIFESTIMAGE}:arm64v8-5.14
+                    docker manifest annotate ${MANIFESTIMAGE}:5.14 ${MANIFESTIMAGE}:arm32v7-5.14 --os linux --arch arm
+                    docker manifest annotate ${MANIFESTIMAGE}:5.14 ${MANIFESTIMAGE}:arm64v8-5.14 --os linux --arch arm64 --variant v8
                     docker manifest push --purge ${MANIFESTIMAGE}:${META_TAG} || :
                     docker manifest create ${MANIFESTIMAGE}:${META_TAG} ${MANIFESTIMAGE}:amd64-${META_TAG} ${MANIFESTIMAGE}:arm32v7-${META_TAG} ${MANIFESTIMAGE}:arm64v8-${META_TAG}
                     docker manifest annotate ${MANIFESTIMAGE}:${META_TAG} ${MANIFESTIMAGE}:arm32v7-${META_TAG} --os linux --arch arm
                     docker manifest annotate ${MANIFESTIMAGE}:${META_TAG} ${MANIFESTIMAGE}:arm64v8-${META_TAG} --os linux --arch arm64 --variant v8
-                    docker manifest push --purge ${MANIFESTIMAGE}:${EXT_RELEASE_TAG} || :
                     docker manifest create ${MANIFESTIMAGE}:${EXT_RELEASE_TAG} ${MANIFESTIMAGE}:amd64-${EXT_RELEASE_TAG} ${MANIFESTIMAGE}:arm32v7-${EXT_RELEASE_TAG} ${MANIFESTIMAGE}:arm64v8-${EXT_RELEASE_TAG}
                     docker manifest annotate ${MANIFESTIMAGE}:${EXT_RELEASE_TAG} ${MANIFESTIMAGE}:arm32v7-${EXT_RELEASE_TAG} --os linux --arch arm
                     docker manifest annotate ${MANIFESTIMAGE}:${EXT_RELEASE_TAG} ${MANIFESTIMAGE}:arm64v8-${EXT_RELEASE_TAG} --os linux --arch arm64 --variant v8
-                    docker manifest push --purge ${MANIFESTIMAGE}:latest
-                    docker manifest push --purge ${MANIFESTIMAGE}:${META_TAG} 
-                    docker manifest push --purge ${MANIFESTIMAGE}:${EXT_RELEASE_TAG} 
+                    docker manifest push --purge ${MANIFESTIMAGE}:5.14
+                    docker manifest push --purge ${MANIFESTIMAGE}:${META_TAG}
+                    docker manifest push --purge ${MANIFESTIMAGE}:${EXT_RELEASE_TAG}
                   done
                '''
           }
@@ -754,14 +680,11 @@ pipeline {
                 for DELETEIMAGE in "${GITHUBIMAGE}" "${GITLABIMAGE}" "${IMAGE}"; do
                   docker rmi \
                   ${DELETEIMAGE}:amd64-${META_TAG} \
-                  ${DELETEIMAGE}:amd64-latest \
-                  ${DELETEIMAGE}:amd64-${EXT_RELEASE_TAG} \
+                  ${DELETEIMAGE}:amd64-5.14 \
                   ${DELETEIMAGE}:arm32v7-${META_TAG} \
-                  ${DELETEIMAGE}:arm32v7-latest \
-                  ${DELETEIMAGE}:arm32v7-${EXT_RELEASE_TAG} \
+                  ${DELETEIMAGE}:arm32v7-5.14 \
                   ${DELETEIMAGE}:arm64v8-${META_TAG} \
-                  ${DELETEIMAGE}:arm64v8-latest \
-                  ${DELETEIMAGE}:arm64v8-${EXT_RELEASE_TAG} || :
+                  ${DELETEIMAGE}:arm64v8-5.14 || :
                 done
                 docker rmi \
                 ghcr.io/linuxserver/lsiodev-buildcache:arm32v7-${COMMIT_SHA}-${BUILD_NUMBER} \
@@ -773,7 +696,7 @@ pipeline {
     // If this is a public release tag it in the LS Github
     stage('Github-Tag-Push-Release') {
       when {
-        branch "master"
+        branch "5.14"
         expression {
           env.LS_RELEASE != env.EXT_RELEASE_CLEAN + '-ls' + env.LS_TAG_NUMBER
         }
@@ -785,17 +708,17 @@ pipeline {
         sh '''curl -H "Authorization: token ${GITHUB_TOKEN}" -X POST https://api.github.com/repos/${LS_USER}/${LS_REPO}/git/tags \
         -d '{"tag":"'${META_TAG}'",\
              "object": "'${COMMIT_SHA}'",\
-             "message": "Tagging Release '${EXT_RELEASE_CLEAN}'-ls'${LS_TAG_NUMBER}' to master",\
+             "message": "Tagging Release '${EXT_RELEASE_CLEAN}'-ls'${LS_TAG_NUMBER}' to 5.14",\
              "type": "commit",\
              "tagger": {"name": "LinuxServer Jenkins","email": "jenkins@linuxserver.io","date": "'${GITHUB_DATE}'"}}' '''
         echo "Pushing New release for Tag"
         sh '''#! /bin/bash
-              echo "Updating to ${EXT_RELEASE_CLEAN}" > releasebody.json
-              echo '{"tag_name":"'${META_TAG}'",\
-                     "target_commitish": "master",\
-                     "name": "'${META_TAG}'",\
-                     "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n\\n**Remote Changes:**\\n\\n' > start
-              printf '","draft": false,"prerelease": false}' >> releasebody.json
+              curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/releases | jq '.[0] |.body' | sed 's:^.\\(.*\\).$:\\1:' > releasebody.json
+              echo '{"tag_name":"'${EXT_RELEASE_CLEAN}'-ls'${LS_TAG_NUMBER}'",\
+                     "target_commitish": "5.14",\
+                     "name": "'${EXT_RELEASE_CLEAN}'-ls'${LS_TAG_NUMBER}'",\
+                     "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
+              printf '","draft": false,"prerelease": true}' >> releasebody.json
               paste -d'\\0' start releasebody.json > releasebody.json.done
               curl -H "Authorization: token ${GITHUB_TOKEN}" -X POST https://api.github.com/repos/${LS_USER}/${LS_REPO}/releases -d @releasebody.json.done'''
       }
@@ -820,7 +743,7 @@ pipeline {
                 TEMPDIR=$(mktemp -d)
                 docker pull ghcr.io/linuxserver/jenkins-builder:latest
                 docker run --rm -e CONTAINER_NAME=${CONTAINER_NAME} -e GITHUB_BRANCH="${BRANCH_NAME}" -v ${TEMPDIR}:/ansible/jenkins ghcr.io/linuxserver/jenkins-builder:latest
-                docker pull ghcr.io/linuxserver/readme-sync
+                docker pull ghcr.io/linuxserver/lsiodev-readme-sync
                 docker run --rm=true \
                   -e DOCKERHUB_USERNAME=$DOCKERUSER \
                   -e DOCKERHUB_PASSWORD=$DOCKERPASS \
@@ -828,7 +751,7 @@ pipeline {
                   -e DOCKER_REPOSITORY=${IMAGE} \
                   -e GIT_BRANCH=master \
                   -v ${TEMPDIR}/docker-${CONTAINER_NAME}:/mnt \
-                  ghcr.io/linuxserver/readme-sync bash -c 'node sync'
+                  ghcr.io/linuxserver/lsiodev-readme-sync bash -c 'node sync'
                 rm -Rf ${TEMPDIR} '''
         }
       }
